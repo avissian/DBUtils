@@ -1,0 +1,35 @@
+defaults:
+  - &kp { login: kp, passw: *** }
+  - &bm { bm_login: bm, bm_passw: ***, queue_mask: "%MULTI_SIRIUS%" }
+  - &admin { login: admin, passw: *** }
+  - &server { server: fsg-m8000 }
+
+
+
+databases:
+  fsgtest:
+    sort: 1
+    <<: [*kp, *bm, *server]
+    port: 1532
+    sid: fsgtest2
+  fsgetalon:
+    sort: 2
+    <<: [*admin, *bm, *server]
+    port: 1529
+    sid: city_dev
+  fsgmodel:
+    sort: 3
+    <<: [*kp, *bm, *server]
+    port: 1529
+    sid: fsgmod12
+  fsgoutcp:
+    sort: 4
+    <<: [*admin, *bm]
+    server: fsg-demo.ftc.ru
+    port: 1528
+    sid: fsgoutcp
+  fsgdev:
+    sort: 5
+    <<: [*kp, *bm, *server]
+    port: 1532
+    sid: fsgdev
