@@ -33,3 +33,8 @@ databases:
     <<: [*kp, *bm, *server]
     port: 1532
     sid: fsgdev
+
+# Необязательный блок, если порт 0 или не указан, то
+# берётся из ENV переменная PORT, или 8080, если нет и ENV
+webserver:
+  port: 0

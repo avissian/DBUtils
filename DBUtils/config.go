@@ -11,6 +11,7 @@ import (
 // Структура конфига
 type cfgFileT struct {
 	Databases map[string]dbT
+	Webserver webserverT
 }
 
 // Общая структура databases из конфига
@@ -24,6 +25,10 @@ type dbT struct {
 	Port       uint16
 	Sid        string
 	Sort       int
+}
+
+type webserverT struct {
+	Port uint16
 }
 
 // Вычитывание настроек подключения KP

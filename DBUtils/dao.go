@@ -36,7 +36,7 @@ func getConnection(
 }
 
 // Выполнение SQL и возврат строк в виде двумерного слайса с именами столбцов
-func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string, err error) {
+func getRows(db *sql.DB, sql string, params ...any) (tableData TableS, err error) {
 	rows, err := db.Query(sql, params...)
 	if err != nil {
 		log.Printf("Can't create query: %v\n", err)
@@ -57,22 +57,20 @@ func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string, err e
 	for i := range pointers {
 		pointers[i] = &values[i]
 	}
-	// двумерный срез для таблицы результата SQL
-	tableData = make([][]string, 1)
 	// заголовок - имена столбцов
-	tableData[0] = cols
-	idx := 0
+	tableData.Header = cols
+	tableData.Rows = make([][]string, 0)
 
-	for rows.Next() {
-		idx++
+	for idx := 0; rows.Next(); idx++ {
 		// заполняем values через указатели на них
 		err = rows.Scan(pointers...)
 		if err != nil {
 			log.Printf("Can't Next: %v\n", err)
 			return
 		}
-		tableData = append(tableData, make([]string, len(cols)))
-		copy(tableData[idx], values)
+		tableData.Rows = append(tableData.Rows, make([]string, len(cols)))
+		tableData.Rows[idx] = make([]string, len(cols))
+		copy(tableData.Rows[idx], values)
 	}
 
 	return
@@ -90,8 +88,8 @@ func getScalar(db *sql.DB, sql string) (value string, err error) {
 	return
 }
 
-// Волучение статуса процессов
-func procStatDB(dbConfig dbT, c chan<- interface{}) {
+// Получение статуса процессов
+func DBProcStat(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -99,16 +97,18 @@ func procStatDB(dbConfig dbT, c chan<- interface{}) {
 		return
 	}
 	defer db.Close()
-	table, err := getRows(db, `select procname "Процесс",
-							case when is_active=1 then 'активный' else 'ОСТАНОВЛЕН' end "Статус"
-						from kp.v$monitor_menu
-						order by 1`)
+	table, err := getRows(db, `select procshort short,
+								procname "Процесс",
+								case when is_active=1 then 'активный' else 'ОСТАНОВЛЕН' end "Статус"
+							from kp.v$monitor_menu
+							order by 1`)
+	table.Caption = "Процессы RUNPROC"
 	c <- table
 	c <- err
 }
 
 // Вывод блокировок
-func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
+func DBViewLocks(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -117,7 +117,6 @@ func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 	}
 	defer db.Close()
 
-	c <- "Список процессов, блокирующих накат объектов"
 	table, err := getRows(db, `select /*+ ordered */
 						w1.sid waiting_session,
 						h1.sid holding_session,
@@ -136,10 +135,10 @@ func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 						and w.kgllkhdl  = h.kgllkhdl
 						and w.kgllkuse  = w1.saddr
 						and h.kgllkuse  = h1.saddr`)
+	table.Caption = "Список процессов, блокирующих накат объектов"
 	c <- table
 	c <- err
 
-	c <- "Список заблокированных таблиц:"
 	table, err = getRows(db, `select o.owner || '.' || o.object_name table_name,
 									l.session_id,
 									l.oracle_username username,
@@ -150,12 +149,13 @@ func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 									 v$session			s
 								where o.object_id = l.object_id
 								and s.sid(+) = l.session_id`)
+	table.Caption = "Список заблокированных таблиц"
 	c <- table
 	c <- err
 }
 
 // Разрешение блокировок
-func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
+func DBReleaseLocks(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -167,7 +167,8 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 	tableData, err := getRows(db, `select distinct
 								h1.audsid,
 								h1.sid,
-								h1.module
+								h1.module,
+								'OK' "Результат"
 							from dba_kgllock w,
 								dba_kgllock h,
 								v$session w1,
@@ -181,25 +182,22 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 								and w.kgllkuse  = w1.saddr
 								and h.kgllkuse  = h1.saddr`)
 	c <- err
+	tableData.Caption = "Блокировки объектов"
 
-	for idx, values := range tableData {
-		// пропустим заголовок
-		if idx == 0 {
-			continue
-		}
-
-		c <- fmt.Sprintf("Lock was detected. SID=%v, MODULE=%s", values[1], values[2])
-
+	for idx, values := range tableData.Rows {
 		_, err := db.Exec("begin kp.pk_orasys.kill_session(:1); end;", values[0])
-		c <- err
-
+		if err != nil {
+			tableData.Rows[idx][3] = fmt.Sprint(err)
+		}
 	}
+	c <- tableData
 	//
 	tableData, err = getRows(db, `select distinct
 									o1.owner || '.' || o1.object_name table_name,
 									l1.session_id,
 									s.audsid,
-									s.module
+									s.module,
+									'OK' "Результат"
 								from dba_objects	o1,
 									dba_objects		o2,
 									v$locked_object	l1,
@@ -211,22 +209,19 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 								and o1.object_id   = o2.object_id
 								and s.sid          = l1.session_id`)
 	c <- err
+	tableData.Caption = "Блокировки таблиц"
 
-	for idx, values := range tableData {
-		// пропустим заголовок
-		if idx == 0 {
-			continue
-		}
-
-		c <- fmt.Sprintf("Lock was detected. SID=%v TABLE=%s MODULE=%s", values[1], values[0], values[3])
-
+	for idx, values := range tableData.Rows {
 		_, err := db.Exec("begin kp.pk_orasys.kill_session(:1); end;", values[2])
-		c <- err
+		if err != nil {
+			tableData.Rows[idx][4] = fmt.Sprint(err)
+		}
 	}
+	c <- tableData
 }
 
 // Получение версии БД
-func versionDB(dbConfig dbT, c chan<- interface{}) {
+func DBVersion(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -238,13 +233,14 @@ func versionDB(dbConfig dbT, c chan<- interface{}) {
 							to_char(modified, 'dd/mm/yy hh24:mi:ss') modified
 						from kp.programms
 						where type='SYSTEM'`)
+	table.Caption = "Версия Системы \"Город\""
 	c <- table
 	c <- err
 
 }
 
 // Запуск процессов
-func startProcDB(dbConfig dbT, c chan<- interface{}) {
+func DBProcStart(dbConfig dbT, c chan<- interface{}, short string) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -253,23 +249,32 @@ func startProcDB(dbConfig dbT, c chan<- interface{}) {
 	}
 	defer db.Close()
 
-	tableData, err := getRows(db, "select procstart, procname from kp.v$monitor_menu")
+	tableData, err := getRows(db, `select procstart,
+										procname,
+										'Отправлена команда на запуск' \"Результат\"
+								where procshort = :short or :short is null
+								from kp.v$monitor_menu order by procname`,
+		sql.Named("short", short),
+		sql.Named("short", short))
 	c <- err
+	tableData.Caption = "Запуск процессов RUNPROC"
 
-	for key, values := range tableData {
-		// пропуск заголовка
-		if key == 0 {
-			continue
-		}
-
-		c <- fmt.Sprintf("Отправляем процессу \"%s\" команду на запуск", values[1])
+	for idx, values := range tableData.Rows {
 		_, err := db.Exec(fmt.Sprintf("begin %s end;", values[0]))
-		c <- err
+		if err != nil {
+			tableData.Rows[idx][2] = fmt.Sprint(err)
+		}
 	}
+	// удалим первый столбец
+	tableData.Header = tableData.Header[1:]
+	for idx, val := range tableData.Rows {
+		tableData.Rows[idx] = val[1:]
+	}
+	c <- tableData
 }
 
 // Стоп процессов
-func stopProcDB(dbConfig dbT, c chan<- interface{}) {
+func DBProcStop(dbConfig dbT, c chan<- interface{}, short string) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getKP())
@@ -278,23 +283,33 @@ func stopProcDB(dbConfig dbT, c chan<- interface{}) {
 	}
 	defer db.Close()
 
-	tableData, err := getRows(db, "select procstop, procname from kp.v$monitor_menu")
+	tableData, err := getRows(db, `select procstop,
+										procname,
+										'Отправлена команда на остановку' \"Результат\"
+									from kp.v$monitor_menu
+									where procshort = :short or :short is null
+									order by procname`,
+		sql.Named("short", short),
+		sql.Named("short", short))
 	c <- err
+	tableData.Caption = "Остановка процессов RUNPROC"
 
-	for key, values := range tableData {
-		// пропуск заголовка
-		if key == 0 {
-			continue
-		}
-
-		c <- fmt.Sprintf("Отправляем процессу \"%s\" команду на остановку", values[1])
+	for idx, values := range tableData.Rows {
 		_, err := db.Exec(fmt.Sprintf("begin %s end;", values[0]))
-		c <- err
+		if err != nil {
+			tableData.Rows[idx][2] = fmt.Sprint(err)
+		}
 	}
+	// удалим первый столбец
+	tableData.Header = tableData.Header[1:]
+	for idx, val := range tableData.Rows {
+		tableData.Rows[idx] = val[1:]
+	}
+	c <- tableData
 }
 
 // Очистка очередей
-func clearQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
+func DBClearQueues(dbConfig dbT, c chan<- interface{}, pattern string, adapter_id string) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getBM())
@@ -305,8 +320,7 @@ func clearQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 
 	// таблицы очередей для чистки
 	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
-	res := make([][]string, 1+len(tables))
-	res[0] = []string{"Таблица", "Всего записей", "Удалено"}
+	rowsData := make([][]string, len(tables))
 
 	for idx, table := range tables {
 		// покажем стату количества всех записей перед чисткой
@@ -314,23 +328,29 @@ func clearQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 		c <- err
 
 		stmt, err := db.Exec(
-			fmt.Sprintf(`delete
-							from %s c
-							where c.q_name like '%%' || :pattern || '%%'`, table),
-			sql.Named("pattern", strings.ToUpper(pattern)))
+			fmt.Sprintf(`delete from %s c
+					where (c.q_name like '%%' || :pattern || '%%' or :pattern is null)
+					  and (c.user_data.adapter_id = :adapter_id or :adapter_id is null)`,
+				table),
+			sql.Named("pattern", strings.ToUpper(pattern)),
+			sql.Named("pattern", strings.ToUpper(pattern)),
+			sql.Named("adapter_id", adapter_id),
+			sql.Named("adapter_id", adapter_id))
+
 		if err != nil {
 			c <- err
 			continue
 		}
 
 		rows, _ := stmt.RowsAffected()
-		res[1+idx] = []string{table, creqsCount, fmt.Sprintf("%v", rows)}
+		rowsData[idx] = []string{table, creqsCount, fmt.Sprintf("%v", rows)}
 	}
-	c <- res
+
+	c <- TableS{"Очистка очередей", []string{"Таблица", "Всего записей", "Удалено"}, rowsData}
 }
 
 // Информация об очередях
-func infoQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
+func DBInfoQueues(dbConfig dbT, c chan<- interface{}, pattern string, adapter_id string) {
 	defer close(c)
 
 	db, err := getConnection(dbConfig.getBM())
@@ -340,25 +360,29 @@ func infoQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 	defer db.Close()
 	// таблицы очередей
 	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
-	for _, table := range tables {
-		c <- fmt.Sprintf("Таблица %s:", table)
+	for _, tableName := range tables {
 		// костыльная реализация distinct в listagg подзапросом (distinct поддерживается с oracle 19)
 		table, err := getRows(
 			db,
 			fmt.Sprintf(
 				`select sum(cnt) "Записей",
-						q_name "Очередь",
+						nvl(q_name, '<null>') "Очередь",
 						listagg(ids, ', ') within group(order by ids) "Список adapter_id"
 				from (select count(*) cnt,
 							regexp_replace(c.q_name, '^Q_', '') q_name,
 							c.user_data.adapter_id ids
 						from %s c
-					where c.q_name like '%%' || :pattern || '%%'
+					where (c.q_name like '%%' || :pattern || '%%' or :pattern is null)
+					  and (c.user_data.adapter_id = :adapter_id or :adapter_id is null)
 					group by c.q_name,
 						c.user_data.adapter_id)
 				group by q_name
-				order by 1 desc`, table),
-			sql.Named("pattern", strings.ToUpper(pattern)))
+				order by 1 desc`, tableName),
+			sql.Named("pattern", strings.ToUpper(pattern)),
+			sql.Named("pattern", strings.ToUpper(pattern)),
+			sql.Named("adapter_id", adapter_id),
+			sql.Named("adapter_id", adapter_id))
+		table.Caption = tableName
 		c <- table
 		c <- err
 	}

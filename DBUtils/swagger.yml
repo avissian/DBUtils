@@ -1,0 +1,190 @@
+basePath: /api
+definitions:
+  TableS:
+    description: таблица
+    properties:
+      caption:
+        description: заголовок таблицы
+        type: string
+        x-go-name: Caption
+      header:
+        description: список столбцов
+        items:
+          type: string
+        type: array
+        x-go-name: Header
+      rows:
+        description: массив строк
+        items:
+          items:
+            type: string
+          type: array
+        type: array
+        x-go-name: Rows
+    type: object
+    x-go-package: stash.ftc.ru/projects/FSG/repos/test-utils-source/browse/DBUtils
+info:
+  contact:
+    email: p.degtyarev@cft.ru
+    name: Pavel Degtyarev
+  description: Набор скриптов типовых операций с БД
+  license:
+    name: MIT
+    url: http://opensource.org/licenses/MIT
+  title: API DBUtils
+  version: 0.0.1
+paths:
+  /api/{database}/locks:
+    delete:
+      description: Разрешение блокировок объектов БД
+      operationId: releaseLocks
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - блокировки
+    get:
+      description: Список блокировок объектов БД
+      operationId: getLocks
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - блокировки
+  /api/{database}/processes:
+    get:
+      description: Список процессов и их состояний
+      operationId: getProcesses
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - процессы
+    put:
+      description: Остановка процессов
+      operationId: stopProcesses
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      - description: procshort
+        in: query
+        name: short
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - процессы
+  /api/{database}/queues:
+    delete:
+      description: Очистка очередей с фильтрами по параметрам
+      operationId: clearQueues
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      - description: фильтрация по части имени очереди
+        in: query
+        name: name
+        type: string
+      - description: фильтрация точному совпадению adapter_id (S# или P#)
+        in: query
+        name: adapter_id
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - очереди
+    get:
+      description: Список очередей с фильтрами по параметрам
+      operationId: getQueues
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      - description: фильтрация по части имени очереди
+        in: query
+        name: name
+        type: string
+      - description: фильтрация точному совпадению adapter_id (S# или P#)
+        in: query
+        name: adapter_id
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+      tags:
+      - очереди
+  /api/{database}/version:
+    get:
+      description: Получение версии и даты наката
+      operationId: getVersion
+      parameters:
+      - description: имя БД из config.yml
+        in: path
+        name: database
+        required: true
+        type: string
+      responses:
+        "200":
+          $ref: '#/responses/tables'
+        "500":
+          $ref: '#/responses/error'
+produces:
+- application/json
+responses:
+  error:
+    description: Сообщение об ошибке
+    headers:
+      error:
+        description: текст ошибки
+        type: string
+  tables:
+    description: Массив таблиц
+    headers:
+      tables:
+        description: таблицы
+        items:
+          $ref: '#/definitions/TableS'
+        type: array
+schemes:
+- http
+swagger: "2.0"
