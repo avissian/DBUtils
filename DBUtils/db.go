@@ -252,7 +252,7 @@ func stopProcDB(dbConfig dbT, c chan<- interface{}) {
 }
 
 // Очистка очередей
-func clearQueuesDB(dbConfig dbT, pattern string, c chan<- interface{}) {
+func clearQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 	defer close(c)
 
 	db := getConnection(dbConfig.getBM())
@@ -279,7 +279,7 @@ func clearQueuesDB(dbConfig dbT, pattern string, c chan<- interface{}) {
 }
 
 // Информация об очередях
-func infoQueuesDB(dbConfig dbT, pattern string, c chan<- interface{}) {
+func infoQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 	defer close(c)
 
 	db := getConnection(dbConfig.getBM())

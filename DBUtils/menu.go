@@ -58,57 +58,37 @@ func subMenu(dbName string, dbConfig dbT) {
 	cli := gocli.MkCLI(pterm.FgGreen.Sprintf("База: %s", dbName))
 
 	cli.AddOption("w", "просмотр статуса процессов Runproc", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go procStatDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(procStatDB, dbConfig)
 	})
 	cli.AddOption("sr", "запустить процессы Runproc", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go startProcDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(startProcDB, dbConfig)
 	})
 	cli.AddOption("shr", "остановить процессы Runproc", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go stopProcDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(stopProcDB, dbConfig)
 	})
 	cli.AddOption("l", "список блокировок БД", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go viewLocksDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(viewLocksDB, dbConfig)
 	})
 	cli.AddOption("rl", "разрешить блокировки БД", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go releaseLocksDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(releaseLocksDB, dbConfig)
 	})
 	cli.AddOption("i", "информация по очередям", func(args []string) (_ string) {
-		infoQueues(dbConfig, &cli)
-		return
+		return queues(infoQueuesDB, dbConfig, &cli)
 	})
 	cli.AddOption("c", "почистить очереди", func(args []string) (_ string) {
-		go clearQueues(dbConfig, &cli)
-		return
+		return queues(clearQueuesDB, dbConfig, &cli)
 	})
 	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) (_ string) {
-		c := make(chan interface{})
-		go versionDB(dbConfig, c)
-		cliPrint(c)
-		return
+		return standartCommand(versionDB, dbConfig)
 	})
 
 	// добавление зашитых команд
 	cli.AddSeparator()
 	cli.AddOption("?", "показать доступные команды", cli.Help)
 	cli.AddOption("e", "назад", cli.Exit)
-	cli.AddOption("q", "выход", func(args []string) string {
+	cli.AddOption("q", "выход", func(args []string) (_ string) {
 		os.Exit(0)
-		return ""
+		return
 	})
 
 	// обработчик неверной команды
@@ -122,38 +102,38 @@ func subMenu(dbName string, dbConfig dbT) {
 
 }
 
-// Считывание ввода для подменю, вызов метода работы с БД
-func clearQueues(dbConfig dbT, cli *gocli.CLI) {
-	pattern, _ := cli.Liner.Prompt(
-		fmt.Sprintf(
-			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
-			strings.ToUpper(dbConfig.Queue_mask)))
-
-	if strings.Compare(pattern, "") == 0 {
-		pattern = dbConfig.Queue_mask
-	}
-
-	fmt.Println()
+// Выполнение стандартной команды
+func standartCommand(
+	function func(dbT, chan<- interface{}),
+	dbConfig dbT) (_ string) {
+	//
 	c := make(chan interface{})
-	go clearQueuesDB(dbConfig, strings.Trim(pattern, "\n"), c)
+	go function(dbConfig, c)
 	cliPrint(c)
+	return
 }
 
 // Считывание ввода для подменю, вызов метода работы с БД
-func infoQueues(dbConfig dbT, cli *gocli.CLI) {
+func queues(
+	function func(dbT, chan<- interface{}, string),
+	dbConfig dbT,
+	cli *gocli.CLI) (_ string) {
+	//
 	pattern, _ := cli.Liner.Prompt(
 		fmt.Sprintf(
 			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
 			strings.ToUpper(dbConfig.Queue_mask)))
 
+	fmt.Println()
+
 	if strings.Compare(pattern, "") == 0 {
 		pattern = dbConfig.Queue_mask
 	}
 
-	fmt.Println()
 	c := make(chan interface{})
-	go infoQueuesDB(dbConfig, strings.Trim(pattern, "\n"), c)
+	go function(dbConfig, c, strings.Trim(pattern, "\n"))
 	cliPrint(c)
+	return
 }
 
 func cliPrint(c <-chan interface{}) {
