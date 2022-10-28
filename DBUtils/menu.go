@@ -30,6 +30,7 @@ func globalMenu() {
 	}
 	sort.Slice(sortArr, func(i int, j int) bool { return sortArr[i].sort < sortArr[j].sort })
 
+	// отрисовка меню
 	for idx, val := range sortArr {
 		cli.AddOption(strconv.Itoa(idx+1), val.name, func(args []string) string {
 			dbName := cli.Options[args[0]].Help
@@ -51,76 +52,31 @@ func globalMenu() {
 	cli.Loop("> ")
 }
 
-func subMenu(dbName string, db dbT) {
+// меню второго уровня
+func subMenu(dbName string, dbConfig dbT) {
 	cli := gocli.MkCLI(pterm.FgGreen.Sprintf("База: %s", dbName))
 	cli.AddOption("", "", func(args []string) string { return "" })
 
 	cli.AddOption("w", "просмотр статуса процессов Runproc", func(args []string) string {
-		return selectExec(db, `select procname "Процесс",
-                                case when Is_active=1 then 'активный' else 'остановлен' end "Статус"
-                            from kp.v$monitor_menu
-                            order by 1`)
+		return procStatDB(dbConfig)
 	})
 	cli.AddOption("sr", "запустить процесс", func(args []string) string {
-		return startProc(db)
+		return startProcDB(dbConfig)
 	})
 	cli.AddOption("shr", "остановить процесс", func(args []string) string {
-		return stopProc(db)
+		return stopProcDB(dbConfig)
 	})
-	cli.AddOption("l", "список заблокированных процессов:", func(args []string) string {
-		pterm.FgLightYellow.Println("Список процессов, блокирующих накат объектов")
-		selectExec(db, `SELECT /*+ ORDERED */
-                            W1.SID WAITING_SESSION,
-                            H1.SID HOLDING_SESSION,
-                            H1.USERNAME USERNAME,
-                            H1.OSUSER OSUSER,
-                            H1.MACHINE MACHINE
-                        FROM DBA_KGLLOCK W,
-                            DBA_KGLLOCK H,
-                            V$SESSION W1,
-                            V$SESSION H1
-                        WHERE (((H.KGLLKMOD != '0')
-                            AND (H.KGLLKMOD != '1')
-                            AND ((H.KGLLKREQ = 0) OR (H.KGLLKREQ = 1)))
-                            AND (((W.KGLLKMOD = 0) OR (W.KGLLKMOD= '1'))
-                            AND ((W.KGLLKREQ != 0) AND (W.KGLLKREQ !='1'))))
-                            AND W.KGLLKTYPE=H.KGLLKTYPE
-                            AND W.KGLLKHDL=H.KGLLKHDL
-                            AND W.KGLLKUSE=W1.SADDR
-                            AND H.KGLLKUSE=H1.SADDR`)
-		pterm.FgLightYellow.Println("Список заблокированных таблиц:")
-		return selectExec(db, `select o.owner || '.' || o.object_name TABLE_NAME
-									,l.session_id
-									,l.oracle_username username
-									,l.OS_USER_NAME
-									,s.MODULE
-								from dba_objects     o
-									,v$locked_object l
-									,v$session       s
-								where o.object_id = l.object_id
-								and s.sid(+) = l.SESSION_ID`)
+	cli.AddOption("l", "список заблокированных процессов", func(args []string) string {
+		return viewLocksDB(dbConfig)
 	})
 	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) string {
-		return selectExec(db, `SELECT version,
-                                    to_char(modified, 'dd/mm/yy hh24:mi:ss') modified
-                                from kp.programms
-                                where type='SYSTEM'`)
+		return versionDB(dbConfig)
 	})
 	cli.AddOption("rl", "разрешить блокировки", func(args []string) string {
-		return locks(db)
+		return releaseLocksDB(dbConfig)
 	})
 	cli.AddOption("c", "почистить очереди", func(args []string) string {
-
-		// fmt.Print("Подстрока наименования очереди: ")
-		pattern, _ := cli.Liner.Prompt(
-			fmt.Sprintf(
-				"Подстрока наименования очереди ('%s' если пусто): ",
-				db.Queue_mask))
-
-		if strings.Compare(pattern, "") == 0 {
-			pattern = db.Queue_mask
-		}
-		return queues(db, strings.Trim(pattern, "\n"))
+		return clearQueues(dbConfig, &cli)
 	})
 
 	cli.AddSeparator()
@@ -137,4 +93,16 @@ func subMenu(dbName string, db dbT) {
 
 	cli.Loop("> ")
 
+}
+
+func clearQueues(dbConfig dbT, cli *gocli.CLI) string {
+	pattern, _ := cli.Liner.Prompt(
+		fmt.Sprintf(
+			"Подстрока наименования очереди ('%s' если пусто): ",
+			dbConfig.Queue_mask))
+
+	if strings.Compare(pattern, "") == 0 {
+		pattern = dbConfig.Queue_mask
+	}
+	return clearQueuesDB(dbConfig, strings.Trim(pattern, "\n"))
 }
