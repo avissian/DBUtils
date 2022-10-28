@@ -57,29 +57,49 @@ func globalMenu(config cfgFileT) {
 func subMenu(dbName string, dbConfig dbT) {
 	cli := gocli.MkCLI(pterm.FgGreen.Sprintf("База: %s", dbName))
 
-	cli.AddOption("w", "просмотр статуса процессов Runproc", func(args []string) string {
-		return procStatDB(dbConfig)
+	cli.AddOption("w", "просмотр статуса процессов Runproc", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go procStatDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
-	cli.AddOption("sr", "запустить процессы Runproc", func(args []string) string {
-		return startProcDB(dbConfig)
+	cli.AddOption("sr", "запустить процессы Runproc", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go startProcDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
-	cli.AddOption("shr", "остановить процессы Runproc", func(args []string) string {
-		return stopProcDB(dbConfig)
+	cli.AddOption("shr", "остановить процессы Runproc", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go stopProcDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
-	cli.AddOption("l", "список блокировок БД", func(args []string) string {
-		return viewLocksDB(dbConfig)
+	cli.AddOption("l", "список блокировок БД", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go viewLocksDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
-	cli.AddOption("rl", "разрешить блокировки БД", func(args []string) string {
-		return releaseLocksDB(dbConfig)
+	cli.AddOption("rl", "разрешить блокировки БД", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go releaseLocksDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
-	cli.AddOption("i", "информация по очередям", func(args []string) string {
-		return infoQueues(dbConfig, &cli)
+	cli.AddOption("i", "информация по очередям", func(args []string) (_ string) {
+		infoQueues(dbConfig, &cli)
+		return
 	})
-	cli.AddOption("c", "почистить очереди", func(args []string) string {
-		return clearQueues(dbConfig, &cli)
+	cli.AddOption("c", "почистить очереди", func(args []string) (_ string) {
+		go clearQueues(dbConfig, &cli)
+		return
 	})
-	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) string {
-		return versionDB(dbConfig)
+	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) (_ string) {
+		c := make(chan interface{})
+		go versionDB(dbConfig, c)
+		cliPrint(c)
+		return
 	})
 
 	// добавление зашитых команд
@@ -103,7 +123,7 @@ func subMenu(dbName string, dbConfig dbT) {
 }
 
 // Считывание ввода для подменю, вызов метода работы с БД
-func clearQueues(dbConfig dbT, cli *gocli.CLI) string {
+func clearQueues(dbConfig dbT, cli *gocli.CLI) {
 	pattern, _ := cli.Liner.Prompt(
 		fmt.Sprintf(
 			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
@@ -112,11 +132,15 @@ func clearQueues(dbConfig dbT, cli *gocli.CLI) string {
 	if strings.Compare(pattern, "") == 0 {
 		pattern = dbConfig.Queue_mask
 	}
-	return clearQueuesDB(dbConfig, strings.Trim(pattern, "\n"))
+
+	fmt.Println()
+	c := make(chan interface{})
+	go clearQueuesDB(dbConfig, strings.Trim(pattern, "\n"), c)
+	cliPrint(c)
 }
 
 // Считывание ввода для подменю, вызов метода работы с БД
-func infoQueues(dbConfig dbT, cli *gocli.CLI) string {
+func infoQueues(dbConfig dbT, cli *gocli.CLI) {
 	pattern, _ := cli.Liner.Prompt(
 		fmt.Sprintf(
 			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
@@ -125,5 +149,31 @@ func infoQueues(dbConfig dbT, cli *gocli.CLI) string {
 	if strings.Compare(pattern, "") == 0 {
 		pattern = dbConfig.Queue_mask
 	}
-	return infoQueuesDB(dbConfig, strings.Trim(pattern, "\n"))
+
+	fmt.Println()
+	c := make(chan interface{})
+	go infoQueuesDB(dbConfig, strings.Trim(pattern, "\n"), c)
+	cliPrint(c)
+}
+
+func cliPrint(c <-chan interface{}) {
+	afterTable := false
+	for val := range c {
+		switch v := val.(type) {
+		case [][]string:
+			pterm.DefaultTable.WithHasHeader().WithData(v).Render()
+			afterTable = true
+		case string:
+			if afterTable {
+				// после таблиц добавим пустую строку
+				fmt.Println()
+			}
+			pterm.FgDefault.Printf("%s\n", v)
+		case error:
+			pterm.PrintOnError(v)
+		case nil:
+		default:
+			pterm.FgDefault.Printf("I don't know about type %T!\n", v)
+		}
+	}
 }
