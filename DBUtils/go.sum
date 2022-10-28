@@ -6,8 +6,8 @@ github.com/MarvinJWendt/testza v0.2.12 h1:/PRp/BF+27t2ZxynTiqj0nyND5PbOtfJS0SuTu
 github.com/MarvinJWendt/testza v0.2.12/go.mod h1:JOIegYyV7rX+7VZ9r77L/eH6CfJHHzXjB69adAhzZkI=
 github.com/atomicgo/cursor v0.0.1 h1:xdogsqa6YYlLfM+GyClC/Lchf7aiMerFiZQn7soTOoU=
 github.com/atomicgo/cursor v0.0.1/go.mod h1:cBON2QmmrysudxNBFthvMtN32r3jxVRIvzkUiF/RuIk=
-github.com/avissian/gocli v0.0.2 h1:/K+QCIFgEal4C5ItygpJZ/uQ/uX5GNFp1NJM3XYklW0=
-github.com/avissian/gocli v0.0.2/go.mod h1:MH1i9QVDtcvmvzh+1+iSnwMIZK3rRFrJaWCAPbUydxE=
+github.com/avissian/gocli v0.0.3 h1:7EpeR09XEQLGobG0qnyraEN5pjPxeTb1Xz67rj25W9I=
+github.com/avissian/gocli v0.0.3/go.mod h1:9yckjdonstJv8liBAs81TE9uI+lXwD36zFxZXz7I4LI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

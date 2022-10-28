@@ -3,7 +3,7 @@ module stash.ftc.ru/projects/FSG/repos/test-utils-source/browse/DBUtils
 go 1.18
 
 require (
-	github.com/avissian/gocli v0.0.2
+	github.com/avissian/gocli v0.0.3
 	github.com/pterm/pterm v0.12.34-0.20211117142035-968f23a77304
 	github.com/sijms/go-ora/v2 v2.4.16
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b

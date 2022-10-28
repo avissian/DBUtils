@@ -72,7 +72,7 @@ func subMenu(dbName string, dbConfig dbT) {
 	cli.AddOption("rl", "разрешить блокировки БД", func(args []string) string {
 		return releaseLocksDB(dbConfig)
 	})
-	cli.AddOption("ci", "информация по очередям", func(args []string) string {
+	cli.AddOption("i", "информация по очередям", func(args []string) string {
 		return infoQueues(dbConfig, &cli)
 	})
 	cli.AddOption("c", "почистить очереди", func(args []string) string {
