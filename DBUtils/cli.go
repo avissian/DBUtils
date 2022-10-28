@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/avissian/gocli"
 	"github.com/pterm/pterm"
@@ -61,10 +62,10 @@ func cliSubMenu(dbName string, dbConfig dbT) {
 		return cliStandartCommand(DBProcStat, dbConfig)
 	})
 	cli.AddOption("sr", "запустить процессы Runproc", func(args []string) (_ string) {
-		return cliProcessCommand(DBProcStart, dbConfig)
+		return cliProcessCommand(true, dbConfig)
 	})
 	cli.AddOption("shr", "остановить процессы Runproc", func(args []string) (_ string) {
-		return cliProcessCommand(DBProcStop, dbConfig)
+		return cliProcessCommand(false, dbConfig)
 	})
 	cli.AddOption("l", "список блокировок БД", func(args []string) (_ string) {
 		return cliStandartCommand(DBViewLocks, dbConfig)
@@ -115,12 +116,72 @@ func cliStandartCommand(
 
 // Выполнение команды работы с процессами
 func cliProcessCommand(
-	function func(dbT, chan<- interface{}, string),
+	is_start bool,
 	dbConfig dbT) (_ string) {
 	//
+	var function func(dbT, chan<- interface{}, string)
+	if is_start {
+		pterm.FgCyan.Println("Отправка команд на запуск:")
+		function = DBProcStart
+	} else {
+		pterm.FgCyan.Println("Отправка команд на остановку:")
+		function = DBProcStop
+	}
+	// Получим список процессов
 	c := make(chan interface{})
-	go function(dbConfig, c, "")
-	cliPrint(c)
+	go DBProcStat(dbConfig, c)
+
+	var procList TableS
+
+	for val := range c {
+		switch v := val.(type) {
+		case TableS:
+			procList = v
+		case error:
+			pterm.PrintOnError(v)
+			return
+		case nil: // nil - это отсутствие ошибки, пропускаем
+		default:
+			pterm.FgDefault.Printf("I don't know about type %T!\n", v)
+			return
+		}
+	}
+
+	// посчитаем самую длинную строку для красивого вывода
+	maxLen := 0
+	for _, row := range procList.Rows {
+		strLen := utf8.RuneCountInString(row[1])
+		if maxLen < strLen {
+			maxLen = strLen
+		}
+	}
+	// построчно стартуем или стопаем процессы
+	for idx, row := range procList.Rows {
+		if idx == 0 {
+			continue
+		}
+		// start/stop
+		chanSub := make(chan interface{})
+		go function(dbConfig, chanSub, row[0])
+		// print
+		for val := range chanSub {
+			switch v := val.(type) {
+			case TableS:
+				// добьём первый столбец поробелами до максимальной длины
+				for _, val := range v.Rows {
+					val[0] = val[0] + strings.Repeat(" ", maxLen-utf8.RuneCountInString(val[0]))
+				}
+				pterm.DefaultTable.WithData(v.Rows).Render()
+			case error:
+				pterm.PrintOnError(v)
+			case nil: // nil - это отсутствие ошибки, пропускаем
+			default:
+				pterm.FgDefault.Printf("I don't know about type %T!\n", v)
+			}
+		}
+
+	}
+
 	return
 }
 
