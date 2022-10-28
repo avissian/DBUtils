@@ -48,7 +48,8 @@ func (dbConfig *dbT) getBM() (string, string, string, uint16, string) {
 func configReader() (config cfgFileT) {
 	file, err := os.Open("config.yml")
 	if err != nil {
-		log.Fatalf("Can't open config file: %v", err)
+		curDir, _ := os.Getwd()
+		log.Fatalf("Can't open config file: %v in %v", err, curDir)
 	}
 	defer func() {
 		if err = file.Close(); err != nil {
@@ -61,6 +62,14 @@ func configReader() (config cfgFileT) {
 	if err = yaml.Unmarshal([]byte(data), &config); err != nil {
 		log.Fatalf("Config parse error: %v", err)
 	}
-	// log.Println(config)
 	return
+}
+
+func getConfigExample() []byte {
+	var config cfgFileT
+	config.Databases = map[string]dbT{
+		"database1": {"bm", "passw", "multi_jsc", "kp", "passw", "server", 1521, "sid", 0},
+		"database2": {"bm", "passw", "multi_jsc", "kp", "passw", "server", 1522, "sid", 1}}
+	configBytes, _ := yaml.Marshal(config)
+	return configBytes
 }

@@ -73,10 +73,10 @@ func subMenu(dbName string, dbConfig dbT) {
 		return standartCommand(releaseLocksDB, dbConfig)
 	})
 	cli.AddOption("i", "информация по очередям", func(args []string) (_ string) {
-		return queues(infoQueuesDB, dbConfig, &cli)
+		return queues(infoQueuesDB, dbConfig, args, &cli)
 	})
 	cli.AddOption("c", "почистить очереди", func(args []string) (_ string) {
-		return queues(clearQueuesDB, dbConfig, &cli)
+		return queues(clearQueuesDB, dbConfig, args, &cli)
 	})
 	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) (_ string) {
 		return standartCommand(versionDB, dbConfig)
@@ -117,17 +117,23 @@ func standartCommand(
 func queues(
 	function func(dbT, chan<- interface{}, string),
 	dbConfig dbT,
+	args []string,
 	cli *gocli.CLI) (_ string) {
 	//
-	pattern, _ := cli.Liner.Prompt(
-		fmt.Sprintf(
-			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
-			strings.ToUpper(dbConfig.Queue_mask)))
+	pattern := ""
+	if len(args) > 1 {
+		pattern = args[1]
+	} else {
+		pattern, _ = cli.Liner.Prompt(
+			fmt.Sprintf(
+				"Подстрока наименования очереди ('%%%s%%' если пусто): ",
+				strings.ToUpper(dbConfig.Queue_mask)))
 
-	fmt.Println()
+		fmt.Println()
 
-	if strings.Compare(pattern, "") == 0 {
-		pattern = dbConfig.Queue_mask
+		if strings.Compare(pattern, "") == 0 {
+			pattern = dbConfig.Queue_mask
+		}
 	}
 
 	c := make(chan interface{})

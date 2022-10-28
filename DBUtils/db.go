@@ -3,10 +3,12 @@ package main
 // Модуль работы с БД
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 
 	"database/sql"
+
 	_ "github.com/sijms/go-ora/v2"
 )
 
@@ -16,9 +18,9 @@ func getConnection(
 	passw string,
 	server string,
 	port uint16,
-	sid string) (db *sql.DB) {
+	sid string) (db *sql.DB, err error) {
 	//
-	db, err := sql.Open(
+	db, err = sql.Open(
 		"oracle",
 		fmt.Sprintf("oracle://%s:%s@%s:%v/%s",
 			url.PathEscape(login),
@@ -26,18 +28,27 @@ func getConnection(
 			server,
 			port,
 			sid))
-	dieOnError("Open Connection:", err)
+	if err != nil {
+		log.Printf("Open Connection: %v\n", err)
+		return
+	}
 	return
 }
 
 // Выполнение SQL и возврат строк в виде двумерного слайса с именами столбцов
-func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string) {
+func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string, err error) {
 	rows, err := db.Query(sql, params...)
+	if err != nil {
+		log.Printf("Can't create query: %v\n", err)
+		return
+	}
 	defer rows.Close()
-	dieOnError("Can't create query:", err)
 
 	cols, err := rows.Columns()
-	dieOnError("Can't get columns:", err)
+	if err != nil {
+		log.Printf("Can't get columns: %v\n", err)
+		return
+	}
 	// иногда статическая типизация - это боль
 	// делаем срез указателей на срез string для возможности передачи
 	// в (*sql.Rows).Scan динамического числа параметров (столбцов)
@@ -56,48 +67,58 @@ func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string) {
 		idx++
 		// заполняем values через указатели на них
 		err = rows.Scan(pointers...)
-		dieOnError("Can't Next", err)
-		tableData = append(tableData, make([]string, len(cols)))
-		for i, v := range values {
-			tableData[idx][i] = fmt.Sprintf("%v", v)
+		if err != nil {
+			log.Printf("Can't Next: %v\n", err)
+			return
 		}
+		tableData = append(tableData, make([]string, len(cols)))
+		copy(tableData[idx], values)
 	}
 
-	return tableData
+	return
 }
 
 // Выполнение SQL и получение первой строки
-func getScalar(db *sql.DB, sql string) string {
-	var value string
+func getScalar(db *sql.DB, sql string) (value string, err error) {
 	rows := db.QueryRow(sql)
-	err := rows.Scan(&value)
-	dieOnError("Can't get scalar value:", err)
+	err = rows.Scan(&value)
+	if err != nil {
+		log.Printf("Can't get scalar value: %v\n", err)
+		return
+	}
 
-	return fmt.Sprintf("%v", value)
+	return
 }
 
 // Волучение статуса процессов
 func procStatDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
-
-	c <- getRows(db, `select procname "Процесс",
+	table, err := getRows(db, `select procname "Процесс",
 							case when is_active=1 then 'активный' else 'ОСТАНОВЛЕН' end "Статус"
 						from kp.v$monitor_menu
 						order by 1`)
+	c <- table
+	c <- err
 }
 
 // Вывод блокировок
 func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 
 	c <- "Список процессов, блокирующих накат объектов"
-	c <- getRows(db, `select /*+ ordered */
+	table, err := getRows(db, `select /*+ ordered */
 						w1.sid waiting_session,
 						h1.sid holding_session,
 						h1.username username,
@@ -115,9 +136,11 @@ func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 						and w.kgllkhdl  = h.kgllkhdl
 						and w.kgllkuse  = w1.saddr
 						and h.kgllkuse  = h1.saddr`)
+	c <- table
+	c <- err
 
 	c <- "Список заблокированных таблиц:"
-	c <- getRows(db, `select o.owner || '.' || o.object_name table_name,
+	table, err = getRows(db, `select o.owner || '.' || o.object_name table_name,
 									l.session_id,
 									l.oracle_username username,
 									l.os_user_name,
@@ -127,16 +150,21 @@ func viewLocksDB(dbConfig dbT, c chan<- interface{}) {
 									 v$session			s
 								where o.object_id = l.object_id
 								and s.sid(+) = l.session_id`)
+	c <- table
+	c <- err
 }
 
 // Разрешение блокировок
 func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 
-	tableData := getRows(db, `select distinct
+	tableData, err := getRows(db, `select distinct
 								h1.audsid,
 								h1.sid,
 								h1.module
@@ -152,6 +180,7 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 								and w.kgllkhdl  = h.kgllkhdl
 								and w.kgllkuse  = w1.saddr
 								and h.kgllkuse  = h1.saddr`)
+	c <- err
 
 	for idx, values := range tableData {
 		// пропустим заголовок
@@ -166,7 +195,7 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 
 	}
 	//
-	tableData = getRows(db, `select distinct
+	tableData, err = getRows(db, `select distinct
 									o1.owner || '.' || o1.object_name table_name,
 									l1.session_id,
 									s.audsid,
@@ -181,6 +210,7 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 								and l1.session_id != l2.session_id
 								and o1.object_id   = o2.object_id
 								and s.sid          = l1.session_id`)
+	c <- err
 
 	for idx, values := range tableData {
 		// пропустим заголовок
@@ -199,13 +229,17 @@ func releaseLocksDB(dbConfig dbT, c chan<- interface{}) {
 func versionDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
-
-	c <- getRows(db, `select version,
+	table, err := getRows(db, `select version,
 							to_char(modified, 'dd/mm/yy hh24:mi:ss') modified
 						from kp.programms
 						where type='SYSTEM'`)
+	c <- table
+	c <- err
 
 }
 
@@ -213,10 +247,14 @@ func versionDB(dbConfig dbT, c chan<- interface{}) {
 func startProcDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 
-	tableData := getRows(db, "select procstart, procname from kp.v$monitor_menu")
+	tableData, err := getRows(db, "select procstart, procname from kp.v$monitor_menu")
+	c <- err
 
 	for key, values := range tableData {
 		// пропуск заголовка
@@ -234,10 +272,14 @@ func startProcDB(dbConfig dbT, c chan<- interface{}) {
 func stopProcDB(dbConfig dbT, c chan<- interface{}) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getKP())
+	db, err := getConnection(dbConfig.getKP())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 
-	tableData := getRows(db, "select procstop, procname from kp.v$monitor_menu")
+	tableData, err := getRows(db, "select procstop, procname from kp.v$monitor_menu")
+	c <- err
 
 	for key, values := range tableData {
 		// пропуск заголовка
@@ -255,41 +297,53 @@ func stopProcDB(dbConfig dbT, c chan<- interface{}) {
 func clearQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getBM())
+	db, err := getConnection(dbConfig.getBM())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 
 	// таблицы очередей для чистки
 	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
+	res := make([][]string, 1+len(tables))
+	res[0] = []string{"Таблица", "Всего записей", "Удалено"}
 
-	for _, table := range tables {
+	for idx, table := range tables {
 		// покажем стату количества всех записей перед чисткой
-		creqsCount := getScalar(db, fmt.Sprintf(`select count(*) from %s`, table))
-		c <- fmt.Sprintf("Всего записей %s: %s", table, creqsCount)
+		creqsCount, err := getScalar(db, fmt.Sprintf(`select count(*) from %s`, table))
+		c <- err
 
 		stmt, err := db.Exec(
 			fmt.Sprintf(`delete
 							from %s c
 							where c.q_name like '%%' || :pattern || '%%'`, table),
 			sql.Named("pattern", strings.ToUpper(pattern)))
-		c <- err
+		if err != nil {
+			c <- err
+			continue
+		}
 
 		rows, _ := stmt.RowsAffected()
-		c <- fmt.Sprintf("Удалено записей %s: %d", table, rows)
+		res[1+idx] = []string{table, creqsCount, fmt.Sprintf("%v", rows)}
 	}
+	c <- res
 }
 
 // Информация об очередях
 func infoQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 	defer close(c)
 
-	db := getConnection(dbConfig.getBM())
+	db, err := getConnection(dbConfig.getBM())
+	if err != nil {
+		return
+	}
 	defer db.Close()
 	// таблицы очередей
 	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
 	for _, table := range tables {
 		c <- fmt.Sprintf("Таблица %s:", table)
 		// костыльная реализация distinct в listagg подзапросом (distinct поддерживается с oracle 19)
-		c <- getRows(
+		table, err := getRows(
 			db,
 			fmt.Sprintf(
 				`select sum(cnt) "Записей",
@@ -305,5 +359,7 @@ func infoQueuesDB(dbConfig dbT, c chan<- interface{}, pattern string) {
 				group by q_name
 				order by 1 desc`, table),
 			sql.Named("pattern", strings.ToUpper(pattern)))
+		c <- table
+		c <- err
 	}
 }
