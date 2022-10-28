@@ -4,6 +4,7 @@ package main
 // swagger:response tables
 type TableSlice struct {
 	// таблицы
+	// in: body
 	Tables []TableS `json:"tables"`
 }
 
@@ -21,5 +22,6 @@ type TableS struct {
 // swagger:response error
 type ErrorS struct {
 	// текст ошибки
+	// in: body
 	Error string `json:"error"`
 }

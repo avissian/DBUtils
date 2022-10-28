@@ -266,7 +266,9 @@ func DBProcStart(dbConfig dbT, c chan<- interface{}, short string) {
 		}
 	}
 	// удалим первый столбец
-	tableData.Header = tableData.Header[1:]
+	if len(tableData.Header) > 0 {
+		tableData.Header = tableData.Header[1:]
+	}
 	for idx, val := range tableData.Rows {
 		tableData.Rows[idx] = val[1:]
 	}
@@ -301,7 +303,9 @@ func DBProcStop(dbConfig dbT, c chan<- interface{}, short string) {
 		}
 	}
 	// удалим первый столбец
-	tableData.Header = tableData.Header[1:]
+	if len(tableData.Header) > 0 {
+		tableData.Header = tableData.Header[1:]
+	}
 	for idx, val := range tableData.Rows {
 		tableData.Rows[idx] = val[1:]
 	}

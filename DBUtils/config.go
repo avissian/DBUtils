@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 
@@ -62,7 +62,7 @@ func configReader() (config cfgFileT) {
 		}
 	}()
 
-	data, err := ioutil.ReadAll(file)
+	data, err := io.ReadAll(file)
 
 	if err = yaml.Unmarshal([]byte(data), &config); err != nil {
 		log.Fatalf("Config parse error: %v", err)

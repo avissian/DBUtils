@@ -2,14 +2,14 @@
 //
 // Набор скриптов типовых операций с БД
 //
-//     Schemes: http
-//     BasePath: /api
-//     Version: 0.0.1
-//     License: MIT http://opensource.org/licenses/MIT
-//     Contact: Pavel Degtyarev <p.degtyarev@cft.ru>
+//	Schemes: http
+//	BasePath: /api
+//	Version: 0.0.1
+//	License: MIT http://opensource.org/licenses/MIT
+//	Contact: Pavel Degtyarev <p.degtyarev@cft.ru>
 //
-//     Produces:
-//     - application/json
+//	Produces:
+//	- application/json
 //
 // swagger:meta
 package main
@@ -27,7 +27,7 @@ func webServer(config cfgFileT) {
 	router.SetTrustedProxies(nil)
 	// GET's
 	router.GET("/api/:database/version", func(context *gin.Context) {
-		// swagger:route GET /api/{database}/version getVersion
+		// swagger:route GET /{database}/version прочее getVersion
 		//
 		// Получение версии и даты наката
 		//
@@ -44,7 +44,7 @@ func webServer(config cfgFileT) {
 		webStandartCommand(DBVersion, config.Databases[context.Param("database")], context)
 	})
 	router.GET("/api/:database/queues", func(context *gin.Context) {
-		// swagger:route GET /api/{database}/queues очереди getQueues
+		// swagger:route GET /{database}/queues очереди getQueues
 		//
 		// Список очередей с фильтрами по параметрам
 		//
@@ -71,7 +71,7 @@ func webServer(config cfgFileT) {
 		webQueuesCommand(DBInfoQueues, config.Databases[context.Param("database")], context)
 	})
 	router.GET("/api/:database/processes", func(context *gin.Context) {
-		// swagger:route GET /api/{database}/processes процессы getProcesses
+		// swagger:route GET /{database}/processes процессы getProcesses
 		//
 		// Список процессов и их состояний
 		//
@@ -88,7 +88,7 @@ func webServer(config cfgFileT) {
 		webStandartCommand(DBProcStat, config.Databases[context.Param("database")], context)
 	})
 	router.GET("/api/{database}/locks", func(context *gin.Context) {
-		// swagger:route GET /api/{database}/locks блокировки getLocks
+		// swagger:route GET /{database}/locks блокировки getLocks
 		//
 		// Список блокировок объектов БД
 		//
@@ -106,7 +106,7 @@ func webServer(config cfgFileT) {
 	})
 	// DELETE's
 	router.DELETE("/api/{database}/queues", func(context *gin.Context) {
-		// swagger:route DELETE /api/{database}/queues очереди clearQueues
+		// swagger:route DELETE /{database}/queues очереди clearQueues
 		//
 		// Очистка очередей с фильтрами по параметрам
 		//
@@ -133,7 +133,7 @@ func webServer(config cfgFileT) {
 		webQueuesCommand(DBClearQueues, config.Databases[context.Param("database")], context)
 	})
 	router.DELETE("/api/:database/locks", func(context *gin.Context) {
-		// swagger:route DELETE /api/{database}/locks блокировки releaseLocks
+		// swagger:route DELETE /{database}/locks блокировки releaseLocks
 		//
 		// Разрешение блокировок объектов БД
 		//
@@ -151,7 +151,7 @@ func webServer(config cfgFileT) {
 	})
 	// PUT's
 	router.PUT("/api/:database/processes/start", func(context *gin.Context) {
-		// swagger:route PUT /api/{database}/processes процессы startProcesses
+		// swagger:route PUT /{database}/processes/start процессы startProcesses
 		//
 		// Запуск процессов
 		//
@@ -173,7 +173,7 @@ func webServer(config cfgFileT) {
 		webProcessesCommand(DBProcStart, config.Databases[context.Param("database")], context)
 	})
 	router.PUT("/api/:database/processes/stop", func(context *gin.Context) {
-		// swagger:route PUT /api/{database}/processes процессы stopProcesses
+		// swagger:route PUT /{database}/processes/stop процессы stopProcesses
 		//
 		// Остановка процессов
 		//
@@ -194,6 +194,9 @@ func webServer(config cfgFileT) {
 		//       500: error
 		webProcessesCommand(DBProcStop, config.Databases[context.Param("database")], context)
 	})
+
+	router.StaticFile("/swagger", "./static/index.html")
+
 	if config.Webserver.Port != 0 {
 		router.Run(fmt.Sprintf(":%v", config.Webserver.Port))
 	} else {
