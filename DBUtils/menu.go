@@ -131,7 +131,7 @@ func queues(
 	}
 
 	c := make(chan interface{})
-	go function(dbConfig, c, strings.Trim(pattern, "\n"))
+	go function(dbConfig, c, pattern)
 	cliPrint(c)
 	return
 }
