@@ -1,337 +1,322 @@
 package main
 
-// модуль работы с БД
+// Модуль работы с БД
 import (
 	"fmt"
-	"io"
+	"net/url"
 	"strings"
 
-	"database/sql/driver"
+	"database/sql"
+
 	"github.com/pterm/pterm"
-	go_ora "github.com/sijms/go-ora"
+	_ "github.com/sijms/go-ora/v2"
 )
 
-func procStatDB(db dbT) string {
-	return selectExec(db, `select procname "Процесс",
-                                case when Is_active=1 then 'активный' else 'остановлен' end "Статус"
-                            from kp.v$monitor_menu
-                            order by 1`)
-}
-
-func viewLocksDB(db dbT) string {
-	pterm.FgLightYellow.Println("Список процессов, блокирующих накат объектов")
-	selectExec(db, `SELECT /*+ ORDERED */
-						W1.SID WAITING_SESSION,
-						H1.SID HOLDING_SESSION,
-						H1.USERNAME USERNAME,
-						H1.OSUSER OSUSER,
-						H1.MACHINE MACHINE
-					FROM DBA_KGLLOCK W,
-						DBA_KGLLOCK H,
-						V$SESSION W1,
-						V$SESSION H1
-					WHERE (((H.KGLLKMOD != '0')
-						AND (H.KGLLKMOD != '1')
-						AND ((H.KGLLKREQ = 0) OR (H.KGLLKREQ = 1)))
-						AND (((W.KGLLKMOD = 0) OR (W.KGLLKMOD= '1'))
-						AND ((W.KGLLKREQ != 0) AND (W.KGLLKREQ !='1'))))
-						AND W.KGLLKTYPE=H.KGLLKTYPE
-						AND W.KGLLKHDL=H.KGLLKHDL
-						AND W.KGLLKUSE=W1.SADDR
-						AND H.KGLLKUSE=H1.SADDR`)
-	pterm.FgLightYellow.Println("Список заблокированных таблиц:")
-	return selectExec(db, `select o.owner || '.' || o.object_name TABLE_NAME
-								,l.session_id
-								,l.oracle_username username
-								,l.OS_USER_NAME
-								,s.MODULE
-							from dba_objects     o
-								,v$locked_object l
-								,v$session       s
-							where o.object_id = l.object_id
-							and s.sid(+) = l.SESSION_ID`)
-}
-
-func versionDB(db dbT) string {
-	return selectExec(db, `SELECT version,
-								to_char(modified, 'dd/mm/yy hh24:mi:ss') modified
-							from kp.programms
-							where type='SYSTEM'`)
-}
-
-func selectExec(db dbT, sql string) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Login, db.Passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
+// Подключение к БД и возврат объекта подключения
+func getConnection(
+	login string,
+	passw string,
+	server string,
+	port uint16,
+	sid string) (db *sql.DB) {
+	//
+	db, err := sql.Open(
+		"oracle",
+		fmt.Sprintf("oracle://%s:%s@%s:%v/%s",
+			url.PathEscape(login),
+			url.PathEscape(passw),
+			server,
+			port,
+			sid))
 	dieOnError("Open Connection:", err)
-	defer conn.Close()
+	return
+}
 
-	stmt := go_ora.NewStmt(sql, conn)
-	defer stmt.Close()
-
-	rows, err := stmt.Query(nil)
+// Выполнение SQL и возврат строк в виде двумерного слайса с именами столбцов
+func getRows(db *sql.DB, sql string, params ...any) (tableData [][]string) {
+	rows, err := db.Query(sql, params...)
+	defer rows.Close()
 	dieOnError("Can't create query:", err)
 
-	defer rows.Close()
-	cols := rows.Columns()
-
-	values := make([]driver.Value, len(cols))
-	tableData := make([][]string, 1)
+	cols, err := rows.Columns()
+	dieOnError("Can't get columns:", err)
+	// иногда статическая типизация - это боль
+	// делаем срез указателей на срез string для возможности передачи
+	// в (*sql.Rows).Scan динамического числа параметров (столбцов)
+	pointers := make([]interface{}, len(cols))
+	values := make([]string, len(cols))
+	for i := range pointers {
+		pointers[i] = &values[i]
+	}
+	// двумерный срез для таблицы результата SQL
+	tableData = make([][]string, 1)
+	// заголовок - имена столбцов
 	tableData[0] = cols
 	idx := 0
 
-	for {
-		idx += 1
-		err = rows.Next(values)
-		if err != nil {
-			break
-		}
+	for rows.Next() {
+		idx++
+		// заполняем values через указатели на них
+		err = rows.Scan(pointers...)
+		dieOnError("Can't Next", err)
 		tableData = append(tableData, make([]string, 0))
 		for _, v := range values {
 			tableData[idx] = append(tableData[idx], fmt.Sprintf("%v", v))
 		}
 	}
-	if err != io.EOF {
-		dieOnError("Can't Next", err)
-	}
 
+	return tableData
+}
+
+// Выполнение SQL и вывод результата в виде таблицы
+func printAsTable(db *sql.DB, sql string, params ...any) {
+	tableData := getRows(db, sql, params...)
 	pterm.DefaultTable.WithHasHeader().WithData(tableData).Render()
-
-	return ""
 }
 
-func executeScalar(db dbT, sql string) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Login, db.Passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
-	dieOnError("Open Connection:", err)
-	defer conn.Close()
+// Выполнение SQL и получение первой строки
+func getScalar(db *sql.DB, sql string) string {
+	var value string
+	rows := db.QueryRow(sql)
+	err := rows.Scan(&value)
+	dieOnError("Can't get scalar value:", err)
 
-	stmt := go_ora.NewStmt(sql, conn)
-	defer stmt.Close()
-
-	rows, err := stmt.Query(nil)
-	dieOnError("Can't create query:", err)
-	defer rows.Close()
-
-	cols := rows.Columns()
-
-	values := make([]driver.Value, len(cols))
-	err = rows.Next(values)
-	dieOnError("Can't get row:", err)
-
-	res := ""
-	for val := range values {
-		res += fmt.Sprintf(", %v", val)
-	}
-
-	return fmt.Sprintf("%+v", res[2:])
+	return fmt.Sprintf("%v", value)
 }
 
-func startProcDB(db dbT) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Login, db.Passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
-	dieOnError("Open Connection:", err)
-	defer conn.Close()
+// Волучение статуса процессов
+func procStatDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	stmt := go_ora.NewStmt("select procstart, procname from kp.v$monitor_menu", conn)
-	defer stmt.Close()
-
-	rows, err := stmt.Query(nil)
-	dieOnError("Can't create query:", err)
-	defer rows.Close()
-
-	values := make([]driver.Value, len(rows.Columns()))
-
-	for {
-		err = rows.Next(values)
-		if err != nil {
-			break
-		}
-
-		pterm.FgWhite.Printf("Процессу \"%s\" отправлена команда на запуск\n", values[1])
-
-		stmt = go_ora.NewStmt(fmt.Sprintf("begin %s end;", values[0]), conn)
-		_, err = stmt.Query(nil)
-		dieOnError("Can't create query:", err)
-		stmt.Close()
-	}
-	if err != io.EOF {
-		dieOnError("Can't Next", err)
-	}
-
-	return ""
+	printAsTable(db, `select procname "Процесс",
+							case when is_active=1 then 'активный' else 'ОСТАНОВЛЕН' end "Статус"
+						from kp.v$monitor_menu
+						order by 1`)
+	return
 }
 
-func stopProcDB(db dbT) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Login, db.Passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
-	dieOnError("Open Connection:", err)
-	defer conn.Close()
+// Вывод блокировок
+func viewLocksDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	stmt := go_ora.NewStmt("select procstop, procname from kp.v$monitor_menu", conn)
-	defer stmt.Close()
+	pterm.FgLightYellow.Println("Список процессов, блокирующих накат объектов")
+	printAsTable(db, `select /*+ ordered */
+						w1.sid waiting_session,
+						h1.sid holding_session,
+						h1.username username,
+						h1.osuser osuser,
+						h1.machine machine
+					from dba_kgllock w,
+						 dba_kgllock h,
+						 v$session w1,
+						 v$session h1
+					where h.kgllkmod not in (0, 1)
+						and h.kgllkreq in  (0, 1)
+						and w.kgllkmod in (0, 1)
+						and w.kgllkreq not in (0, 1)
+						and w.kgllktype = h.kgllktype
+						and w.kgllkhdl  = h.kgllkhdl
+						and w.kgllkuse  = w1.saddr
+						and h.kgllkuse  = h1.saddr`)
 
-	rows, err := stmt.Query(nil)
-	dieOnError("Can't create query:", err)
-	defer rows.Close()
-
-	values := make([]driver.Value, len(rows.Columns()))
-
-	for {
-		err = rows.Next(values)
-		if err != nil {
-			break
-		}
-
-		pterm.FgWhite.Printf("Процессу \"%s\" отправлена команда на остановку\n", values[1])
-
-		stmt := go_ora.NewStmt(fmt.Sprintf("begin %s end;", values[0]), conn)
-		_, err = stmt.Query(nil)
-		dieOnError("Can't create query:", err)
-		stmt.Close()
-	}
-	if err != io.EOF {
-		dieOnError("Can't Next", err)
-	}
-
-	return ""
+	pterm.FgLightYellow.Println("Список заблокированных таблиц:")
+	printAsTable(db, `select o.owner || '.' || o.object_name table_name,
+									l.session_id,
+									l.oracle_username username,
+									l.os_user_name,
+									s.module
+								from dba_objects		o,
+									 v$locked_object	l,
+									 v$session			s
+								where o.object_id = l.object_id
+								and s.sid(+) = l.session_id`)
+	return
 }
 
-func releaseLocksDB(db dbT) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Login, db.Passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
-	dieOnError("Open Connection:", err)
-	defer conn.Close()
+// Разрешение блокировок
+func releaseLocksDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	stmt := go_ora.NewStmt(`select h1.audsid,
+	tableData := getRows(db, `select distinct
+								h1.audsid,
 								h1.sid,
 								h1.module
 							from dba_kgllock w,
 								dba_kgllock h,
 								v$session w1,
 								v$session h1
-							where h.kgllkmod not in ('0', '1')
-								and h.kgllkreq in (0, 1)
-								and w.kgllkmod in ('0', '1')
-								and w.kgllkreq != 0
-								and w.kgllkreq !='1'
+							where h.kgllkmod not in (0, 1)
+								and h.kgllkreq in  (0, 1)
+								and w.kgllkmod in (0, 1)
+								and w.kgllkreq not in (0, 1)
 								and w.kgllktype = h.kgllktype
-								and w.kgllkhdl = h.kgllkhdl
-								and w.kgllkuse = w1.saddr
-								and h.kgllkuse = h1.saddr`, conn)
-	defer stmt.Close()
+								and w.kgllkhdl  = h.kgllkhdl
+								and w.kgllkuse  = w1.saddr
+								and h.kgllkuse  = h1.saddr`)
 
-	rows, err := stmt.Query(nil)
-	dieOnError("Can't create query:", err)
-	defer rows.Close()
-
-	values := make([]driver.Value, len(rows.Columns()))
-
-	for {
-		err = rows.Next(values)
-		if err != nil {
-			break
+	for idx, values := range tableData {
+		// пропустим заголовок
+		if idx == 0 {
+			continue
 		}
 
 		sp, _ := pterm.DefaultSpinner.Start(pterm.FgWhite.Sprintf("Lock was detected. SID=%v, MODULE=%s\n", values[1], values[2]))
 
-		stmt = go_ora.NewStmt(fmt.Sprintf("begin kp.pk_orasys.kill_session(%s); end;", values[0]), conn)
-		_, err = stmt.Query(nil)
+		_, err := db.Exec("begin kp.pk_orasys.kill_session(:1); end;", values[0])
 		if err != nil {
 			sp.Fail()
 		} else {
 			sp.Success()
 		}
-		stmt.Close()
-	}
-	if err != io.EOF {
-		dieOnError("Can't Next", err)
 	}
 	//
-	stmt = go_ora.NewStmt(`select distinct o1.owner || '.' || o1.object_name TABLE_NAME
-									,l1.session_id
-									,s.AUDSID
-									,s.MODULE
-								from dba_objects     o1
-									,dba_objects     o2
-									,v$locked_object l1
-									,v$locked_object l2
-									,v$session       s
+	tableData = getRows(db, `select distinct
+									o1.owner || '.' || o1.object_name table_name,
+									l1.session_id,
+									s.audsid,
+									s.module
+								from dba_objects	o1,
+									dba_objects		o2,
+									v$locked_object	l1,
+									v$locked_object	l2,
+									v$session		s
 								where o1.object_id = l1.object_id
-								and o2.object_id = l2.object_id
-								and l1.SESSION_ID != l2.SESSION_ID
-								and o1.OBJECT_ID = o2.OBJECT_ID
-								and s.sid = l1.SESSION_ID`, conn)
-	defer stmt.Close()
+								and o2.object_id   = l2.object_id
+								and l1.session_id != l2.session_id
+								and o1.object_id   = o2.object_id
+								and s.sid          = l1.session_id`)
 
-	rows, err = stmt.Query(nil)
-	dieOnError("Can't create query:", err)
-	defer rows.Close()
-
-	values = make([]driver.Value, len(rows.Columns()))
-
-	for {
-		err = rows.Next(values)
-		if err != nil {
-			break
+	for idx, values := range tableData {
+		// пропустим заголовок
+		if idx == 0 {
+			continue
 		}
 
 		sp, _ := pterm.DefaultSpinner.Start(pterm.FgWhite.Sprintf("Lock was detected. SID=%v TABLE=%s MODULE=%s\n", values[1], values[0], values[3]))
 
-		stmt = go_ora.NewStmt(fmt.Sprintf("begin kp.pk_orasys.kill_session(%v); end;", values[2]), conn)
-		_, err = stmt.Query(nil)
+		_, err := db.Exec("begin kp.pk_orasys.kill_session(:1); end;", values[2])
 		if err != nil {
 			sp.Fail()
 		} else {
 			sp.Success()
 		}
-		stmt.Close()
-	}
-	if err != io.EOF {
-		dieOnError("Can't Next", err)
 	}
 
-	return ""
+	return
 }
 
-func clearQueuesDB(db dbT, pattern string) string {
-	conn, err := go_ora.NewConnection(fmt.Sprintf("oracle://%s:%s@%s:%v/%s", db.Bm_login, db.Bm_passw, db.Server, db.Port, db.Sid))
-	dieOnError("Connection:", err)
-	err = conn.Open()
-	dieOnError("Open Connection:", err)
-	defer conn.Close()
+// Получение версии БД
+func versionDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	creqsCount := executeScalar(db, `SELECT count(*)
-							from bm.creqs_tab`)
-	pterm.FgYellow.Printf("Всего записай creqs: %s\n", creqsCount)
-	ireqsCount := executeScalar(db, `SELECT count(*)
-							from bm.ireqs_tab`)
-	pterm.FgYellow.Printf("Всего записай ireqs: %s\n", ireqsCount)
+	printAsTable(db, `select version,
+							to_char(modified, 'dd/mm/yy hh24:mi:ss') modified
+						from kp.programms
+						where type='SYSTEM'`)
+	return
+}
 
-	stmt := go_ora.NewStmt("delete from bm.creqs_tab c where c.q_name like '%'||:pattern||'%'", conn)
-	defer stmt.Close()
+// Запуск процессов
+func startProcDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	stmt.AddParam("pattern", strings.ToUpper(pattern), 0, go_ora.Input)
-	res, err := stmt.Exec(nil)
-	dieOnError("Exec:", err)
+	tableData := getRows(db, "select procstart, procname from kp.v$monitor_menu")
 
-	rows, _ := res.RowsAffected()
-	pterm.FgWhite.Printf("Удалено записей creqs: %d\n", rows)
-	//
+	for key, values := range tableData {
+		// пропуск заголовка
+		if key == 0 {
+			continue
+		}
 
-	stmt = go_ora.NewStmt("delete from bm.ireqs_tab c where c.q_name like '%'||:pattern||'%'", conn)
-	defer stmt.Close()
+		pterm.FgWhite.Printf("Отправляем процессу \"%s\" команду на запуск\n", values[1])
+		_, err := db.Exec(fmt.Sprintf("begin %s end;", values[0]))
+		pterm.FgRed.PrintOnError(err)
+	}
 
-	stmt.AddParam("pattern", strings.ToUpper(pattern), 0, go_ora.Input)
-	res, err = stmt.Exec(nil)
-	dieOnError("Exec:", err)
+	return
+}
 
-	rows, _ = res.RowsAffected()
-	pterm.FgWhite.Printf("Удалено записей ireqs: %d\n", rows)
+// Стоп процессов
+func stopProcDB(dbConfig dbT) (_ string) {
+	db := getConnection(dbConfig.getKP())
+	defer db.Close()
 
-	return ""
+	tableData := getRows(db, "select procstop, procname from kp.v$monitor_menu")
+
+	for key, values := range tableData {
+		// пропуск заголовка
+		if key == 0 {
+			continue
+		}
+
+		pterm.FgWhite.Printf("Отправляем процессу \"%s\" команду на остановку\n", values[1])
+		_, err := db.Exec(fmt.Sprintf("begin %s end;", values[0]))
+		pterm.FgRed.PrintOnError(err)
+	}
+
+	return
+}
+
+// Очистка очередей
+func clearQueuesDB(dbConfig dbT, pattern string) (_ string) {
+	db := getConnection(dbConfig.getBM())
+	defer db.Close()
+
+	// таблицы очередей для чистки
+	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
+
+	for _, table := range tables {
+		// покажем стату количества всех записей перед чисткой
+		creqsCount := getScalar(db, fmt.Sprintf(`select count(*) from %s`, table))
+		pterm.FgYellow.Printf("Всего записей %s: %s\n", table, creqsCount)
+
+		stmt, err := db.Exec(
+			fmt.Sprintf(`delete
+							from %s c
+							where c.q_name like '%%' || :pattern || '%%'`, table),
+			sql.Named("pattern", strings.ToUpper(pattern)))
+		dieOnError("Can't exec:", err)
+
+		rows, _ := stmt.RowsAffected()
+		pterm.FgWhite.Printf("Удалено записей %s: ", table)
+		pterm.FgLightCyan.Printf("%d\n", rows)
+	}
+
+	return
+}
+
+// Информация об очередях
+func infoQueuesDB(dbConfig dbT, pattern string) (_ string) {
+	db := getConnection(dbConfig.getBM())
+
+	defer db.Close()
+	// таблицы очередей
+	tables := []string{"bm.creqs_tab", "bm.ireqs_tab"}
+	for _, table := range tables {
+		pterm.FgYellow.Printf("Таблица %s:\n", table)
+		// костыльная реализация distinct в listagg подзапросом (distinct поддерживается с oracle 19)
+		printAsTable(
+			db,
+			fmt.Sprintf(
+				`select sum(cnt) "Записей",
+						q_name "Очередь",
+						listagg(ids, ', ') within group(order by ids) "Список adapter_id"
+				from (select count(*) cnt,
+							regexp_replace(c.q_name, '^Q_', '') q_name,
+							c.user_data.adapter_id ids
+						from %s c
+					where c.q_name like '%%' || :pattern || '%%'
+					group by c.q_name,
+						c.user_data.adapter_id)
+				group by q_name
+				order by 1 desc`, table),
+			sql.Named("pattern", strings.ToUpper(pattern)))
+	}
+
+	return
 }

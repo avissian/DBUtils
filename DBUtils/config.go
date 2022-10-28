@@ -1,12 +1,19 @@
 package main
 
 import (
-	yaml "gopkg.in/yaml.v3"
 	"io/ioutil"
 	"log"
 	"os"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
+// Структура конфига
+type cfgFileT struct {
+	Databases map[string]dbT
+}
+
+// Общая структура databases из конфига
 type dbT struct {
 	Bm_login   string
 	Bm_passw   string
@@ -14,32 +21,46 @@ type dbT struct {
 	Login      string
 	Passw      string
 	Server     string
-	Port       uint32
+	Port       uint16
 	Sid        string
 	Sort       int
 }
 
-type cfgFileT struct {
-	Databases map[string]dbT
+// Вычитывание настроек подключения KP
+func (dbConfig *dbT) getKP() (string, string, string, uint16, string) {
+	return dbConfig.Login,
+		dbConfig.Passw,
+		dbConfig.Server,
+		dbConfig.Port,
+		dbConfig.Sid
 }
 
-var config cfgFileT
+// Вычитывание настроек подключения BM
+func (dbConfig *dbT) getBM() (string, string, string, uint16, string) {
+	return dbConfig.Bm_login,
+		dbConfig.Bm_passw,
+		dbConfig.Server,
+		dbConfig.Port,
+		dbConfig.Sid
+}
 
-func configReader() {
+// Чтение конфига с диска
+func configReader() (config cfgFileT) {
 	file, err := os.Open("config.yml")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Can't open config file: %v", err)
 	}
 	defer func() {
 		if err = file.Close(); err != nil {
-			log.Fatal(err)
+			log.Fatalf("Can't close config file: %v", err)
 		}
 	}()
 
 	data, err := ioutil.ReadAll(file)
 
 	if err = yaml.Unmarshal([]byte(data), &config); err != nil {
-		log.Fatalf("error: %v", err)
+		log.Fatalf("Config parse error: %v", err)
 	}
 	// log.Println(config)
+	return
 }

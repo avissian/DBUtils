@@ -1,7 +1,7 @@
 defaults:
-  - &kp { login: kp, passw: *** }
-  - &bm { bm_login: bm, bm_passw: ***, queue_mask: "%MULTI_SIRIUS%" }
-  - &admin { login: admin, passw: *** }
+  - &kp { login: kp, passw: "***" }
+  - &bm { bm_login: bm, bm_passw: "***", queue_mask: "MULTI_SIRIUS" }
+  - &admin { login: admin, passw: "***" }
   - &server { server: fsg-m8000 }
 
 

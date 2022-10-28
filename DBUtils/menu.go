@@ -11,16 +11,13 @@ import (
 	"github.com/pterm/pterm"
 )
 
-type sortS struct {
-	sort int
-	name string
-}
-
-func globalMenu() {
-	cli := gocli.MkCLI(pterm.FgGreen.Sprint("Выбор БД"))
-	cli.AddOption("", "", func(args []string) string { return "" })
-
-	// Добавление в меню databases из конфига в соответствии с sort
+// Добавление в меню databases из конфига в соответствии с sort
+func globalMenu(config cfgFileT) {
+	// сортировка пунктов меню
+	type sortS struct {
+		sort int
+		name string
+	}
 	sortArr := make([]sortS, len(config.Databases))
 	idx := 0
 	for key, val := range config.Databases {
@@ -31,6 +28,7 @@ func globalMenu() {
 	sort.Slice(sortArr, func(i int, j int) bool { return sortArr[i].sort < sortArr[j].sort })
 
 	// отрисовка меню
+	cli := gocli.MkCLI(pterm.FgGreen.Sprint("Выбор БД"))
 	for idx, val := range sortArr {
 		cli.AddOption(strconv.Itoa(idx+1), val.name, func(args []string) string {
 			dbName := cli.Options[args[0]].Help
@@ -40,69 +38,92 @@ func globalMenu() {
 			return ""
 		})
 	}
-
+	// добавление зашитых команд
 	cli.AddSeparator()
-	cli.AddOption("?", "Показать доступные команды", cli.Help)
-	cli.AddOption("q", "Выход", cli.Exit)
+	cli.AddOption("?", "показать доступные команды", cli.Help)
+	cli.AddOption("q", "выход", cli.Exit)
 
+	// обработчик неверной команды
 	cli.DefaultOption(func(args []string) string {
 		return pterm.FgRed.Sprintf("%s: команда не найдена\n", args[0])
 	})
+	// обработчик случайного нажатия Enter (пустая команда)
+	cli.AddOption("", "", func(args []string) string { return "" })
 
 	cli.Loop("> ")
 }
 
-// меню второго уровня
+// Меню второго уровня
 func subMenu(dbName string, dbConfig dbT) {
 	cli := gocli.MkCLI(pterm.FgGreen.Sprintf("База: %s", dbName))
-	cli.AddOption("", "", func(args []string) string { return "" })
 
 	cli.AddOption("w", "просмотр статуса процессов Runproc", func(args []string) string {
 		return procStatDB(dbConfig)
 	})
-	cli.AddOption("sr", "запустить процесс", func(args []string) string {
+	cli.AddOption("sr", "запустить процессы Runproc", func(args []string) string {
 		return startProcDB(dbConfig)
 	})
-	cli.AddOption("shr", "остановить процесс", func(args []string) string {
+	cli.AddOption("shr", "остановить процессы Runproc", func(args []string) string {
 		return stopProcDB(dbConfig)
 	})
-	cli.AddOption("l", "список заблокированных процессов", func(args []string) string {
+	cli.AddOption("l", "список блокировок БД", func(args []string) string {
 		return viewLocksDB(dbConfig)
 	})
-	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) string {
-		return versionDB(dbConfig)
-	})
-	cli.AddOption("rl", "разрешить блокировки", func(args []string) string {
+	cli.AddOption("rl", "разрешить блокировки БД", func(args []string) string {
 		return releaseLocksDB(dbConfig)
+	})
+	cli.AddOption("ci", "информация по очередям", func(args []string) string {
+		return infoQueues(dbConfig, &cli)
 	})
 	cli.AddOption("c", "почистить очереди", func(args []string) string {
 		return clearQueues(dbConfig, &cli)
 	})
+	cli.AddOption("v", "версия Системы \"Город\"", func(args []string) string {
+		return versionDB(dbConfig)
+	})
 
+	// добавление зашитых команд
 	cli.AddSeparator()
-	cli.AddOption("?", "Показать доступные команды", cli.Help)
-	cli.AddOption("e", "Назад", cli.Exit)
-	cli.AddOption("q", "Выход", func(args []string) string {
+	cli.AddOption("?", "показать доступные команды", cli.Help)
+	cli.AddOption("e", "назад", cli.Exit)
+	cli.AddOption("q", "выход", func(args []string) string {
 		os.Exit(0)
 		return ""
 	})
 
+	// обработчик неверной команды
 	cli.DefaultOption(func(args []string) string {
 		return pterm.FgRed.Sprintf("%s: команда не найдена", args[0])
 	})
+	// обработчик случайного нажатия Enter (пустая команда)
+	cli.AddOption("", "", func(args []string) string { return "" })
 
 	cli.Loop("> ")
 
 }
 
+// Считывание ввода для подменю, вызов метода работы с БД
 func clearQueues(dbConfig dbT, cli *gocli.CLI) string {
 	pattern, _ := cli.Liner.Prompt(
 		fmt.Sprintf(
-			"Подстрока наименования очереди ('%s' если пусто): ",
-			dbConfig.Queue_mask))
+			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
+			strings.ToUpper(dbConfig.Queue_mask)))
 
 	if strings.Compare(pattern, "") == 0 {
 		pattern = dbConfig.Queue_mask
 	}
 	return clearQueuesDB(dbConfig, strings.Trim(pattern, "\n"))
+}
+
+// Считывание ввода для подменю, вызов метода работы с БД
+func infoQueues(dbConfig dbT, cli *gocli.CLI) string {
+	pattern, _ := cli.Liner.Prompt(
+		fmt.Sprintf(
+			"Подстрока наименования очереди ('%%%s%%' если пусто): ",
+			strings.ToUpper(dbConfig.Queue_mask)))
+
+	if strings.Compare(pattern, "") == 0 {
+		pattern = dbConfig.Queue_mask
+	}
+	return infoQueuesDB(dbConfig, strings.Trim(pattern, "\n"))
 }
