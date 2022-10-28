@@ -251,9 +251,10 @@ func DBProcStart(dbConfig dbT, c chan<- interface{}, short string) {
 
 	tableData, err := getRows(db, `select procstart,
 										procname,
-										'Отправлена команда на запуск' \"Результат\"
+										'Отправлена команда на запуск' "Результат"
+								from kp.v$monitor_menu
 								where procshort = :short or :short is null
-								from kp.v$monitor_menu order by procname`,
+                                                                order by procname`,
 		sql.Named("short", short),
 		sql.Named("short", short))
 	c <- err
@@ -287,7 +288,7 @@ func DBProcStop(dbConfig dbT, c chan<- interface{}, short string) {
 
 	tableData, err := getRows(db, `select procstop,
 										procname,
-										'Отправлена команда на остановку' \"Результат\"
+										'Отправлена команда на остановку' "Результат"
 									from kp.v$monitor_menu
 									where procshort = :short or :short is null
 									order by procname`,
